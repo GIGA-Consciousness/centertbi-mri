@@ -1,2 +1,4 @@
-username='username'
-password='pass'
+{
+    "username": "test",
+    "password": "lala"
+}
