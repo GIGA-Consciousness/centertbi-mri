@@ -1,3 +1,4 @@
+// Input your CTBI credentials (you need to have access to https://files.center-tbi.eu/remote.php/webdav/imaging/) and rename this file to login.cfg
 {
     "username": "test",
     "password": "lala"
