@@ -4,7 +4,7 @@
 # Auxiliary functions library for reports extractor and dicom anonymization
 # Copyright (C) 2017-2019 Larroque Stephen
 # Licensed under MIT License.
-# v2.4.2
+# v2.4.3
 #
 
 from __future__ import absolute_import
@@ -323,6 +323,15 @@ def remove_strings_from_df(df):
     return df[df.applymap(isnumber)].applymap(float)
 
 def concat_vals(x):
+    """Concatenate after a groupby values in a list, and keep the same order (except if all values are the same or null, then return a singleton)"""
+    x = list([y for y in x if not pd.isnull(y)])
+    if len(set(x)) == 1:
+        x = x[0]
+    elif len([y for y in x if not pd.isnull(y)]) == 0:
+        x = None
+    return x
+
+def concat_vals_unique(x):
     """Concatenate after a groupby values in a list (if not null and not unique, else return the singleton value)"""
     x = list(set([y for y in x if not pd.isnull(y)]))
     if len(x) == 1:
