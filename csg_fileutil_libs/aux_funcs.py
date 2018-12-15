@@ -1,10 +1,10 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
 #
-# Auxiliary functions library for reports extractor and dicom anonymization
-# Copyright (C) 2017-2019 Larroque Stephen
+# Auxiliary functions library for data fusion from reports extractor, dicoms and dicom anonymization, etc
+# Copyright (C) 2017-2019 Stephen Karl Larroque
 # Licensed under MIT License.
-# v2.4.3
+# v2.4.4
 #
 
 from __future__ import absolute_import
@@ -103,10 +103,12 @@ def save_df_as_csv(d, output_file, fields_order=None, csv_order_by=None, keep_in
     return True
 
 
-def distance_jaccard_words(seq1, seq2, partial=True, norm=False, dist=0, minlength=0):
+def distance_jaccard_words(seq1, seq2, partial=False, norm=False, dist=0, minlength=0):
     """Jaccard distance on two lists of words. Any permutation is tested, so the resulting distance is insensitive to words order.
-    @param partial boolean Set to True to get fuzzy matching (ie, a word matches if character distance < dist)
-    @param norm [True/False/None] True to get normalized result (number of equal words divided by total words count from both), False to get the number of different words, None to get the number of equal words."""
+    @param dist float Set to any value above 0 to get fuzzy matching (ie, a word matches if character distance < dist)
+    @param partial boolean Set to True to match words if one of the two starts with the other (eg: 'allan' and 'al' will match) - combine with minlength to ensure a minimum length to match
+    @param norm [True/False/None] True to get normalized result (number of equal words divided by total words count from both), False to get the number of different words, None to get the number of equal words.
+    @param minlength int Minimum number of caracters to allow comparison and matching between words (else a word smaller than this will be a 'dead weight' if norm=True in the sense that it will still be accounted in the total but cannot be matched)"""
     # The goal was to have a distance on words that 1- is insensible to permutation ; 2- returns 0.2 or less if only one or two words are different, except if one of the lists has only one entry! ; 3- insensible to shortened name ; 4- allow for similar but not totally exact words.
     seq1_c = filter(None, list(seq1))
     seq2_c = filter(None, list(seq2))
@@ -142,7 +144,7 @@ def distance_jaccard_words_split(s1, s2, *args, **kwargs):
     if 'wordsplit_pattern' in kwargs:
         del kwargs['wordsplit_pattern']
     if not wordsplit_pattern:
-        wordsplit_pattern = r'-+|\s+|,+|\.+|/+';
+        wordsplit_pattern = r'\s+|_+|,+|\.+|/+';  # do not split on -+| because - indicates a single word/name
 
     return distance_jaccard_words(re.split(wordsplit_pattern, s1), re.split(wordsplit_pattern, s2), *args, **kwargs)
 
@@ -259,8 +261,8 @@ def merge_two_df(df1, df2, col='Name', dist_threshold=0.2, dist_words_threshold=
                 name1 = cleanup_name(replace_buggy_accents(c))
                 name2 = cleanup_name(replace_buggy_accents(cd))
                 # Compute similarity
-                testsim1 = distance.nlevenshtein(name1, name2, method=1) <= dist_threshold
-                testsim2 = distance_jaccard_words_split(name1, name2, partial=True, norm=True, dist=dist_threshold) <= dist_words_threshold
+                testsim1 = distance.nlevenshtein(name1, name2, method=1) <= dist_threshold  # character-wise distance on the whole name
+                testsim2 = distance_jaccard_words_split(name1, name2, partial=False, norm=True, dist=dist_threshold) <= dist_words_threshold  # word-wise distance
                 if (mode==0 and (testsim1 or testsim2)) or (mode==1 and testsim1 and testsim2): # use shortest distance with normalized levenshtein
                     # Found a similar name in both df, add the names
                     dmerge.append( (c, cd) )
@@ -324,7 +326,7 @@ def remove_strings_from_df(df):
 
 def concat_vals(x):
     """Concatenate after a groupby values in a list, and keep the same order (except if all values are the same or null, then return a singleton)"""
-    x = list([y for y in x if not pd.isnull(y)])
+    x = list(x)
     if len(set(x)) == 1:
         x = x[0]
     elif len([y for y in x if not pd.isnull(y)]) == 0:
@@ -434,15 +436,18 @@ def cleanup_name_customregex_df(cf, customregex=None):
     return cf
 
 def compute_names_distance_matrix(list1, list2, dist_threshold_letters=0.2, dist_threshold_words=0.2, dist_threshold_words_norm=True, dist_minlength=0):
-    """Find all similar items in two lists that are below a specified distance threshold (using both letters- and words- levenshtein distances). This is different from disambiguate_names() which is working on a single dataframe (trying to uniformize the names (mis)spellings)."""
+    """Find all similar items in two lists that are below a specified distance threshold (using both letters- and words- levenshtein distances). This is different from disambiguate_names() which is working on a single dataframe (trying to uniformize the names (mis)spellings).
+    Note: this works less efficiently than merge_two_df(), you should use the latter."""
     dist_matches = {}
     for subj in _tqdm(list1, total=len(list1), desc='MERGE'):
         found = False
+        subj = cleanup_name(replace_buggy_accents(subj))
         for c in list2:
-            # use shortest distance with normalized levenshtein
+            c = cleanup_name(replace_buggy_accents(c))
+            # use shortest distance with either normalized levenshtein distance or non-normalized levenshtein distance
             if distance.nlevenshtein(subj, c, method=1) <= dist_threshold_letters or (
-                (dist_threshold_words_norm is not None and distance_jaccard_words_split(subj, c, partial=True, norm=dist_threshold_words_norm, dist=dist_threshold_letters, minlength=dist_minlength) <= dist_threshold_words) or
-                (dist_threshold_words_norm is None and distance_jaccard_words_split(subj, c, partial=True, norm=dist_threshold_words_norm, dist=dist_threshold_letters, minlength=dist_minlength) >= dist_threshold_words)
+                (dist_threshold_words_norm is not None and distance_jaccard_words_split(subj, c, partial=False, norm=dist_threshold_words_norm, dist=dist_threshold_letters, minlength=dist_minlength) <= dist_threshold_words) or
+                (dist_threshold_words_norm is None and distance_jaccard_words_split(subj, c, partial=False, norm=dist_threshold_words_norm, dist=dist_threshold_letters, minlength=dist_minlength) >= dist_threshold_words)
                 ):
                 if subj not in dist_matches:
                     dist_matches[subj] = []
@@ -460,7 +465,7 @@ def disambiguate_names(cf, dist_threshold=0.2, verbose=False): # TODO: replace b
     for c in cf.itertuples(): # TODO: does not work with more than 255 columns!
         for c2 in cf.ix[c.Index+1:,:].itertuples():
             if c.name != c2.name and \
-            (distance.nlevenshtein(c.name, c2.name, method=1) <= dist_threshold or distance_jaccard_words_split(c2.name, c.name, partial=True, norm=True, dist=dist_threshold) <= dist_threshold): # use shortest distance with normalized levenshtein
+            (distance.nlevenshtein(c.name, c2.name, method=1) <= dist_threshold or distance_jaccard_words_split(c2.name, c.name, partial=False, norm=True, dist=dist_threshold) <= dist_threshold): # use shortest distance with normalized levenshtein
                 if verbose:
                     print(c.name, c2.name, c2.Index, distance.nlevenshtein(c.name, c2.name, method=1))
                 # Replace the name of the second entry with the name of the first entry
